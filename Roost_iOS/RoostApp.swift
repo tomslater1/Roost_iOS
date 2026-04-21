@@ -111,6 +111,8 @@ struct RoostApp: App {
                     SyncCoordinator.shared.register(CustomCategoryMutationHandler())
                     SyncCoordinator.shared.register(SavingsGoalMutationHandler())
                     SyncCoordinator.shared.register(HouseholdIncomeMutationHandler())
+                    SyncCoordinator.shared.register(ShoppingMutationHandler())
+                    SyncCoordinator.shared.register(ChoreMutationHandler())
                     await SyncCoordinator.shared.drainIfOnline()
                 }
                 .onChange(of: authManager.currentUser?.id) { _, userId in

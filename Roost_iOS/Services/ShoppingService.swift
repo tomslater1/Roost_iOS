@@ -24,6 +24,17 @@ struct ShoppingService {
             .value
     }
 
+    /// Like `createItem`, but accepts a client-supplied UUID so offline
+    /// writes can be queued and replayed without desyncing the optimistic
+    /// cache row.
+    func insertItem(_ item: InsertShoppingItem) async throws {
+        let client = try SupabaseClientProvider.shared.requireClient()
+        try await client
+            .from("shopping_items")
+            .insert(item)
+            .execute()
+    }
+
     func updateItem(_ item: ShoppingItem) async throws {
         let client = try SupabaseClientProvider.shared.requireClient()
         try await client

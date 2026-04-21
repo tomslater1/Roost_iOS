@@ -37,4 +37,16 @@ enum MutationErrorClassifier {
         let description = String(describing: error).lowercased()
         return description.contains("404") || description.contains("not found") || description.contains("no rows")
     }
+
+    /// True when the server rejects a create because the row already exists
+    /// (unique-constraint violation). This happens when another device
+    /// already replayed the same client-supplied UUID — LWW treats it as a
+    /// reconciliation rather than a failure.
+    static func isDuplicate(_ error: Error) -> Bool {
+        let description = String(describing: error).lowercased()
+        return description.contains("23505")
+            || description.contains("duplicate key")
+            || description.contains("already exists")
+            || description.contains("conflict")
+    }
 }

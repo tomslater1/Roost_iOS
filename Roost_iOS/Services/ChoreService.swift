@@ -24,6 +24,17 @@ struct ChoreService {
             .value
     }
 
+    /// Like `createChore`, but accepts a client-supplied UUID so offline
+    /// writes can be queued and replayed without desyncing the optimistic
+    /// cache row.
+    func insertChore(_ chore: InsertChore) async throws {
+        let client = try SupabaseClientProvider.shared.requireClient()
+        try await client
+            .from("chores")
+            .insert(chore)
+            .execute()
+    }
+
     func updateChore(_ chore: Chore) async throws {
         let client = try SupabaseClientProvider.shared.requireClient()
         var payload: [String: AnyJSON] = [

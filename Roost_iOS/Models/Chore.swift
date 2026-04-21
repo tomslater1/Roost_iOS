@@ -128,6 +128,47 @@ struct CreateChore: Codable, Hashable {
     }
 }
 
+/// Like `CreateChore` but carries a client-supplied UUID + createdAt so
+/// offline creates can be queued and later replayed against the server
+/// without the server inventing a new ID (which would desync the
+/// optimistic cache row).
+struct InsertChore: Codable, Hashable {
+    var id: UUID
+    var homeID: UUID
+    var title: String
+    var description: String?
+    var room: String?
+    var assignedTo: UUID?
+    var dueDate: Date?
+    var frequency: String?
+    var createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case homeID = "home_id"
+        case title
+        case description
+        case room
+        case assignedTo = "assigned_to"
+        case dueDate = "due_date"
+        case frequency
+        case createdAt = "created_at"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(homeID, forKey: .homeID)
+        try container.encode(title, forKey: .title)
+        try container.encodeIfPresent(description, forKey: .description)
+        try container.encodeIfPresent(room, forKey: .room)
+        try container.encodeIfPresent(assignedTo, forKey: .assignedTo)
+        try container.encodeDateOnlyIfPresent(dueDate, forKey: .dueDate)
+        try container.encodeIfPresent(frequency, forKey: .frequency)
+        try container.encode(createdAt, forKey: .createdAt)
+    }
+}
+
 private enum ChoreDateCoding {
     static let formatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()

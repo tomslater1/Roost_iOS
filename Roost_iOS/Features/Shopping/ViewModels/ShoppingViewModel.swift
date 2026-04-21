@@ -2,18 +2,20 @@ import Foundation
 import Observation
 import Realtime
 
-// MARK: - Optimistic Update Pattern (Phase 2 reference)
+// MARK: - Offline-aware Shopping (Phase 3)
 //
-// Every mutation that modifies a list should follow this pattern:
+// Reads are cache-first via `ShoppingRepository`; writes go through
+// `OfflineAwareWrite.enqueue`, which:
 //
-// 1. Immediately update the local array (optimistic)
-// 2. Call the service method
-// 3. On error: rollback the local change + set errorMessage
-// 4. On success: call ActivityService.logActivity() (fire-and-forget)
-// 5. Realtime will trigger a full re-fetch to reconcile
+//   1. Applies an optimistic cache write (sets isDirty = true +
+//      pendingOperation).
+//   2. Enqueues a `PendingMutation` for the real server call.
+//   3. Triggers `SyncCoordinator.drainIfOnline()` so the replay runs
+//      immediately when online (and is a no-op when offline).
 //
-// See toggleItem() and deleteItem() below for the canonical implementations.
-// All other ViewModels (Expenses, Chores, etc.) should follow this same pattern.
+// The old direct-service rollback pattern is gone — the queue owns
+// retry/failure. If a mutation ultimately fails permanently, it surfaces
+// in Settings → Pending Changes rather than silently rolling back here.
 
 @MainActor
 @Observable
@@ -41,7 +43,7 @@ final class ShoppingViewModel {
     }
 
     @ObservationIgnored
-    private let shoppingService = ShoppingService()
+    private let repository = ShoppingRepository()
 
     @ObservationIgnored
     private let hazelService = HazelService()
@@ -56,10 +58,20 @@ final class ShoppingViewModel {
         isLoading = true
         errorMessage = nil
 
+        // 1) Cache-first — instant paint.
+        if let cached = try? repository.loadCached(homeID: homeId) {
+            items = cached
+        }
+
+        // 2) Refresh from server in the background; swallow network errors so
+        //    offline users keep their cached list.
         do {
-            items = try await shoppingService.fetchItems(for: homeId)
+            try await repository.refresh(homeID: homeId)
+            if let refreshed = try? repository.loadCached(homeID: homeId) {
+                items = refreshed
+            }
         } catch {
-            if !isCancellation(error) {
+            if !isCancellation(error) && !isNetworkFailure(error) {
                 errorMessage = String(describing: error)
             }
         }
@@ -78,7 +90,11 @@ final class ShoppingViewModel {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else { return }
 
-        // If Hazel is enabled and no category was manually provided, normalize and auto-categorize
+        // If Hazel is enabled and no category was manually provided, normalize
+        // and auto-categorize. Hazel requires network, so when offline we just
+        // fall through with the raw name + no category; the row stays
+        // uncategorised until the user edits it online (Phase 3 doesn't yet
+        // defer Hazel normalisation like it does expense categorisation).
         var resolvedName = trimmedName
         var resolvedCategory = category?.isEmpty == true ? nil : category
 
@@ -89,66 +105,110 @@ final class ShoppingViewModel {
             }
         }
 
-        let newItem = CreateShoppingItem(
+        let resolvedQuantity: String? = quantity?.isEmpty == true ? nil : quantity
+        let newID = UUID()
+        let now = Date()
+
+        let optimistic = ShoppingItem(
+            id: newID,
             homeID: homeId,
             name: resolvedName,
-            quantity: quantity?.isEmpty == true ? nil : quantity,
-            category: resolvedCategory
+            quantity: resolvedQuantity,
+            category: resolvedCategory,
+            checked: false,
+            addedBy: userId,
+            checkedBy: nil,
+            createdAt: now,
+            updatedAt: nil
         )
 
         do {
-            let created = try await shoppingService.createItem(newItem)
-            items.insert(created, at: 0)
+            try repository.applyOptimisticUpsert(optimistic, pendingOperation: "create")
+            if let cached = try? repository.loadCached(homeID: homeId) {
+                items = cached
+            } else {
+                items.insert(optimistic, at: 0)
+            }
+
+            let insert = InsertShoppingItem(
+                id: newID,
+                homeID: homeId,
+                name: resolvedName,
+                quantity: resolvedQuantity,
+                category: resolvedCategory,
+                checked: false
+            )
+            let payload = try JSONEncoder.mutation.encode(ShoppingCreatePayload(item: insert))
+            try OfflineAwareWrite.enqueue(.init(
+                entityType: "shopping_item",
+                operation: "create",
+                targetID: newID,
+                homeID: homeId,
+                payload: payload
+            ))
+
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
                 action: "added \(trimmedName) to the shopping list",
                 entityType: "shopping_item",
-                entityId: created.id.uuidString
+                entityId: newID.uuidString
             )
         } catch {
-            if !isCancellation(error) {
-                errorMessage = error.localizedDescription
-            }
+            errorMessage = error.localizedDescription
         }
     }
 
     func toggleItem(_ item: ShoppingItem, homeId: UUID, userId: UUID) async {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
 
-        // Optimistic update
-        items[index].checked.toggle()
-        let nowCompleted = items[index].checked
+        var updated = items[index]
+        updated.checked.toggle()
+        updated.checkedBy = updated.checked ? userId : nil
+        updated.updatedAt = Date()
+        let nowCompleted = updated.checked
 
         do {
-            try await shoppingService.updateItem(items[index])
-            let action = nowCompleted
-                ? "checked off \(item.name)"
-                : "unchecked \(item.name)"
+            try repository.applyOptimisticUpsert(updated, pendingOperation: "update")
+            items[index] = updated
+
+            let payload = try JSONEncoder.mutation.encode(updated)
+            try OfflineAwareWrite.enqueue(.init(
+                entityType: "shopping_item",
+                operation: "update",
+                targetID: updated.id,
+                homeID: homeId,
+                payload: payload
+            ))
+
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
-                action: action,
+                action: nowCompleted
+                    ? "checked off \(item.name)"
+                    : "unchecked \(item.name)",
                 entityType: "shopping_item",
                 entityId: item.id.uuidString
             )
         } catch {
-            // Rollback
-            items[index].checked.toggle()
-            if !isCancellation(error) {
-                errorMessage = error.localizedDescription
-            }
+            errorMessage = error.localizedDescription
         }
     }
 
     func deleteItem(_ item: ShoppingItem, homeId: UUID, userId: UUID) async {
         guard let index = items.firstIndex(where: { $0.id == item.id }) else { return }
-
-        // Optimistic update
         let removed = items.remove(at: index)
 
         do {
-            try await shoppingService.deleteItem(id: removed.id)
+            try repository.applyOptimisticDelete(itemID: removed.id)
+            try OfflineAwareWrite.enqueue(.init(
+                entityType: "shopping_item",
+                operation: "delete",
+                targetID: removed.id,
+                homeID: homeId,
+                payload: Data()
+            ))
+
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
@@ -157,11 +217,9 @@ final class ShoppingViewModel {
                 entityId: removed.id.uuidString
             )
         } catch {
-            // Rollback
+            // Restore if enqueue itself failed (rare — SwiftData full).
             items.insert(removed, at: min(index, items.count))
-            if !isCancellation(error) {
-                errorMessage = error.localizedDescription
-            }
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -193,5 +251,19 @@ final class ShoppingViewModel {
     private func isCancellation(_ error: Error) -> Bool {
         (error as? URLError)?.code == .cancelled ||
         (error as NSError).code == NSURLErrorCancelled
+    }
+
+    private func isNetworkFailure(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost,
+                 .timedOut, .cannotConnectToHost, .cannotFindHost,
+                 .dnsLookupFailed, .internationalRoamingOff, .dataNotAllowed:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 }

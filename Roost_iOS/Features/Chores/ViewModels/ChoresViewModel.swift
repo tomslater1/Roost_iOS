@@ -16,6 +16,9 @@ final class ChoresViewModel {
     private let choreService = ChoreService()
 
     @ObservationIgnored
+    private let choreRepository = ChoreRepository()
+
+    @ObservationIgnored
     private let hazelService = HazelService()
 
     @ObservationIgnored
@@ -72,18 +75,26 @@ final class ChoresViewModel {
         isLoading = true
         errorMessage = nil
 
+        // Cache-first paint so the chores list renders instantly offline.
+        if let cached = try? choreRepository.loadCached(homeID: homeId) {
+            chores = cached
+        }
+
         do {
-            async let choresResult = choreService.fetchChores(for: homeId)
+            async let choresResult = choreRepository.refresh(homeID: homeId)
             async let roomsResult = roomService.fetchRooms(for: homeId)
             async let roomGroupsResult = roomService.fetchRoomGroups(for: homeId)
             async let activityResult = activityService.fetchActivity(for: homeId)
 
-            chores = try await choresResult
+            try await choresResult
+            if let refreshed = try? choreRepository.loadCached(homeID: homeId) {
+                chores = refreshed
+            }
             rooms = try await roomsResult
             roomGroups = try await roomGroupsResult
             completionHistoryByChoreId = groupedCompletionHistory(from: try await activityResult)
         } catch {
-            if !isCancellation(error) {
+            if !isCancellation(error) && !isNetworkFailure(error) {
                 errorMessage = String(describing: error)
             }
         }
@@ -112,30 +123,55 @@ final class ChoresViewModel {
             }
         }
 
-        let payload = CreateChore(
+        let newID = UUID()
+        let now = Date()
+        let optimistic = Chore(
+            id: newID,
             homeID: homeId,
             title: resolvedTitle,
             description: normalized(description),
             room: normalized(room),
             assignedTo: assignedTo,
             dueDate: dueDate,
-            frequency: frequency
+            completedBy: nil,
+            frequency: frequency,
+            lastCompletedAt: nil,
+            createdAt: now
         )
 
         do {
-            let created = try await choreService.createChore(payload)
-            chores.append(created)
+            try choreRepository.applyOptimisticUpsert(optimistic, pendingOperation: "create")
+            chores.append(optimistic)
+
+            let insert = InsertChore(
+                id: newID,
+                homeID: homeId,
+                title: resolvedTitle,
+                description: normalized(description),
+                room: normalized(room),
+                assignedTo: assignedTo,
+                dueDate: dueDate,
+                frequency: frequency,
+                createdAt: now
+            )
+            let payload = try JSONEncoder.mutation.encode(ChoreCreatePayload(chore: insert))
+            try OfflineAwareWrite.enqueue(.init(
+                entityType: "chore",
+                operation: "create",
+                targetID: newID,
+                homeID: homeId,
+                payload: payload
+            ))
+
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
                 action: "added chore \(resolvedTitle)",
                 entityType: "chore",
-                entityId: created.id.uuidString
+                entityId: newID.uuidString
             )
         } catch {
-            if !isCancellation(error) {
-                errorMessage = String(describing: error)
-            }
+            errorMessage = String(describing: error)
         }
     }
 
@@ -155,10 +191,19 @@ final class ChoresViewModel {
             updated.dueDate = nextDueDate(from: original.dueDate, frequency: original.frequency, completionDate: completionDate)
         }
 
-        chores[index] = updated
-
         do {
-            try await choreService.updateChore(updated)
+            try choreRepository.applyOptimisticUpsert(updated, pendingOperation: "update")
+            chores[index] = updated
+
+            let payload = try JSONEncoder.mutation.encode(updated)
+            try OfflineAwareWrite.enqueue(.init(
+                entityType: "chore",
+                operation: "update",
+                targetID: updated.id,
+                homeID: homeId,
+                payload: payload
+            ))
+
             if updated.isCompleted {
                 ActivityService.logActivity(
                     homeId: homeId.uuidString,
@@ -178,20 +223,24 @@ final class ChoresViewModel {
                 )
             }
         } catch {
-            chores[index] = original
-            if !isCancellation(error) {
-                errorMessage = String(describing: error)
-            }
+            errorMessage = String(describing: error)
         }
     }
 
     func deleteChore(_ chore: Chore, homeId: UUID, userId: UUID) async {
         guard let index = chores.firstIndex(where: { $0.id == chore.id }) else { return }
-
         let removed = chores.remove(at: index)
 
         do {
-            try await choreService.deleteChore(id: removed.id)
+            try choreRepository.applyOptimisticDelete(choreID: removed.id)
+            try OfflineAwareWrite.enqueue(.init(
+                entityType: "chore",
+                operation: "delete",
+                targetID: removed.id,
+                homeID: homeId,
+                payload: Data()
+            ))
+
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
@@ -201,9 +250,7 @@ final class ChoresViewModel {
             )
         } catch {
             chores.insert(removed, at: min(index, chores.count))
-            if !isCancellation(error) {
-                errorMessage = String(describing: error)
-            }
+            errorMessage = String(describing: error)
         }
     }
 
@@ -312,9 +359,12 @@ final class ChoresViewModel {
 
     private func refreshChores(homeId: UUID) async {
         do {
-            chores = try await choreService.fetchChores(for: homeId)
+            try await choreRepository.refresh(homeID: homeId)
+            if let refreshed = try? choreRepository.loadCached(homeID: homeId) {
+                chores = refreshed
+            }
         } catch {
-            if !isCancellation(error) {
+            if !isCancellation(error) && !isNetworkFailure(error) {
                 errorMessage = String(describing: error)
             }
         }
@@ -334,6 +384,20 @@ final class ChoresViewModel {
     private func isCancellation(_ error: Error) -> Bool {
         (error as? URLError)?.code == .cancelled ||
         (error as NSError).code == NSURLErrorCancelled
+    }
+
+    private func isNetworkFailure(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost,
+                 .timedOut, .cannotConnectToHost, .cannotFindHost,
+                 .dnsLookupFailed, .internationalRoamingOff, .dataNotAllowed:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 
     private func groupedCompletionHistory(from activity: [ActivityFeedItem]) -> [UUID: [ActivityFeedItem]] {

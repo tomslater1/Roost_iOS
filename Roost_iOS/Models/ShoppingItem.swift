@@ -39,3 +39,24 @@ struct CreateShoppingItem: Codable, Hashable {
         case category
     }
 }
+
+/// Like `CreateShoppingItem` but carries a client-supplied UUID so offline
+/// creates can be queued and later replayed against the server without the
+/// server inventing a new ID (which would desync the optimistic cache row).
+struct InsertShoppingItem: Codable, Hashable {
+    var id: UUID
+    var homeID: UUID
+    var name: String
+    var quantity: String?
+    var category: String?
+    var checked: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case homeID = "home_id"
+        case name
+        case quantity
+        case category
+        case checked
+    }
+}
