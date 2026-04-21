@@ -15,6 +15,12 @@ final class MonthlyMoneyViewModel {
     private let service = MonthlyMoneyService()
 
     @ObservationIgnored
+    private let expenseRepository = ExpenseRepository()
+
+    @ObservationIgnored
+    private let budgetRepository = BudgetRepository()
+
+    @ObservationIgnored
     private var incomeSubscriptionId: UUID?
 
     @ObservationIgnored
@@ -56,13 +62,32 @@ final class MonthlyMoneyViewModel {
 
     // MARK: - Load
 
-    func loadSummary(homeId: UUID) async {
+    func loadSummary(homeId: UUID, members: [HomeMember] = []) async {
         isLoading = true
         error = nil
         do {
             summary = try await service.fetchMonthlySummary(homeId: homeId, month: selectedMonth)
         } catch {
-            if !isCancellation(error) { self.error = error }
+            if !isCancellation(error) {
+                // Offline fallback: server RPC is unreachable, so compute a
+                // coarse `MonthlySummary` from cached expenses + budgets +
+                // in-memory home members. Accuracy is lower (fixed vs
+                // envelope split is rolled into `totalBudgeted`) but it
+                // keeps the Money screen readable; the server reconciles
+                // on next online refresh.
+                if isNetworkFailure(error), !members.isEmpty {
+                    let cachedExpenses = (try? expenseRepository.loadCached(homeID: homeId)) ?? []
+                    let cachedBudgets = (try? budgetRepository.loadCached(homeID: homeId)) ?? []
+                    summary = MonthlyMoneyCalculator.compute(
+                        members: members,
+                        expenses: cachedExpenses,
+                        budgets: cachedBudgets,
+                        month: selectedMonth
+                    )
+                } else {
+                    self.error = error
+                }
+            }
         }
         isLoading = false
     }
@@ -116,6 +141,23 @@ final class MonthlyMoneyViewModel {
     private func isCancellation(_ error: Error) -> Bool {
         (error as? URLError)?.code == .cancelled ||
         (error as NSError).code == NSURLErrorCancelled
+    }
+
+    /// Matches URLError codes that indicate the device is offline or cannot
+    /// reach the server. Used to decide whether to attempt the local-compute
+    /// fallback for the monthly summary.
+    private func isNetworkFailure(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost,
+                 .timedOut, .cannotConnectToHost, .cannotFindHost,
+                 .dnsLookupFailed, .internationalRoamingOff, .dataNotAllowed:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 }
 

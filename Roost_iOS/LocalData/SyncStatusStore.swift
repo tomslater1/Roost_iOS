@@ -39,6 +39,12 @@ final class SyncStatusStore {
     var reconciliationCount: Int = 0
     var lastAcknowledgedReconciliation: Int = 0
 
+    /// Incremented once per drain cycle that successfully replayed at least
+    /// one mutation. Observers hook post-drain work (e.g. Hazel deferred
+    /// categorisation of expenses that were created offline without a
+    /// category) by watching this counter.
+    var drainCompletedCount: Int = 0
+
     var hasUnacknowledgedReconciliation: Bool {
         reconciliationCount > lastAcknowledgedReconciliation
     }

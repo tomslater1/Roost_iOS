@@ -155,6 +155,36 @@ struct CreateExpense: Codable, Hashable {
     }
 }
 
+/// Same shape as `CreateExpense` but carries a **client-supplied UUID**. Used
+/// by the offline mutation queue so the cached row and the eventual server
+/// row share the same primary key, preserving referential integrity for any
+/// follow-up offline edits of the same expense.
+struct InsertExpense: Codable, Hashable {
+    var id: UUID
+    var homeID: UUID
+    var title: String
+    var amount: Decimal
+    var paidBy: UUID
+    var splitType: String
+    var category: String?
+    var notes: String?
+    var incurredOn: String
+    var isRecurring: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case homeID = "home_id"
+        case title
+        case amount
+        case paidBy = "paid_by"
+        case splitType = "split_type"
+        case category
+        case notes
+        case incurredOn = "date"
+        case isRecurring = "is_recurring"
+    }
+}
+
 struct Settlement: Codable, Identifiable, Hashable {
     let id: UUID
     var homeID: UUID?

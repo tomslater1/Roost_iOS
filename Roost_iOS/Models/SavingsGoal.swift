@@ -196,6 +196,52 @@ struct CreateSavingsGoal: Codable {
     }
 }
 
+/// Same shape as `CreateSavingsGoal` but carries a **client-supplied UUID**.
+/// Used by the offline mutation queue so cached rows and eventual server
+/// rows share the same primary key.
+struct InsertSavingsGoal: Codable {
+    var id: UUID
+    var homeId: UUID
+    var name: String
+    var targetAmount: Decimal
+    var savedAmount: Decimal
+    var colour: String
+    var icon: String?
+    var targetDate: Date?
+    var sortOrder: Int?
+    var monthlyContribution: Decimal?
+    var contributionDay: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case homeId = "home_id"
+        case name
+        case targetAmount = "target_amount"
+        case savedAmount = "current_amount"
+        case colour
+        case icon
+        case targetDate = "target_date"
+        case sortOrder = "sort_order"
+        case monthlyContribution = "monthly_contribution"
+        case contributionDay = "contribution_day"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(homeId, forKey: .homeId)
+        try container.encode(name, forKey: .name)
+        try container.encode(targetAmount, forKey: .targetAmount)
+        try container.encode(savedAmount, forKey: .savedAmount)
+        try container.encode(colour, forKey: .colour)
+        try container.encodeIfPresent(icon, forKey: .icon)
+        try container.encodeSavingsDateOnlyIfPresent(targetDate, forKey: .targetDate)
+        try container.encodeIfPresent(sortOrder, forKey: .sortOrder)
+        try container.encodeIfPresent(monthlyContribution, forKey: .monthlyContribution)
+        try container.encodeIfPresent(contributionDay, forKey: .contributionDay)
+    }
+}
+
 private enum SavingsGoalDateCoding {
     static let dateOnlyFormatter: DateFormatter = {
         let formatter = DateFormatter()

@@ -116,9 +116,15 @@ final class SyncCoordinator {
     func drain() async {
         guard !isDraining else { return }
         isDraining = true
+        var anySucceeded = false
         defer {
             isDraining = false
             refreshStatusCounts()
+            if anySucceeded {
+                // Post-drain hook for consumers (e.g. Hazel bulk categorisation
+                // of offline-created expenses that landed without a category).
+                SyncStatusStore.shared.drainCompletedCount += 1
+            }
         }
 
         let queue = MutationQueue()
@@ -129,7 +135,8 @@ final class SyncCoordinator {
                     // Re-check connectivity between rows — network may have
                     // dropped mid-drain and subsequent rows should stop.
                     guard canDrain() else { return }
-                    await replay(mutation, via: queue)
+                    let succeeded = await replay(mutation, via: queue)
+                    if succeeded { anySucceeded = true }
                 }
                 batch = try queue.nextBatch(limit: 25)
             }
@@ -152,7 +159,12 @@ final class SyncCoordinator {
 
     // MARK: Private replay
 
-    private func replay(_ mutation: PendingMutation, via queue: MutationQueue) async {
+    /// Returns true if the mutation was replayed successfully (including the
+    /// LWW "reconciled by server" outcome, which is treated as success at the
+    /// queue level). Used by `drain()` to decide whether to bump the
+    /// post-drain hook counter.
+    @discardableResult
+    private func replay(_ mutation: PendingMutation, via queue: MutationQueue) async -> Bool {
         guard let handler = handlers[mutation.entityType] else {
             // No handler registered — this is a permanent failure from the
             // coordinator's perspective. Surface for user review.
@@ -161,7 +173,7 @@ final class SyncCoordinator {
                 error: "No handler registered for \(mutation.entityType).",
                 terminal: true
             )
-            return
+            return false
         }
 
         try? queue.markInFlight(mutation.id)
@@ -169,12 +181,15 @@ final class SyncCoordinator {
         do {
             try await handler.replay(mutation)
             try? queue.markSucceeded(mutation.id)
+            return true
         } catch let error as MutationHandlerError {
             switch error {
             case .transient(let msg):
                 try? queue.markFailed(mutation.id, error: msg, terminal: false)
+                return false
             case .permanent(let msg):
                 try? queue.markFailed(mutation.id, error: msg, terminal: true)
+                return false
             case .reconciledByServer(let msg):
                 // LWW — server wins. We count this as "success" for the queue
                 // but bump the reconciliation counter so the UI can show a
@@ -182,14 +197,17 @@ final class SyncCoordinator {
                 try? queue.markSucceeded(mutation.id)
                 SyncStatusStore.shared.reconciliationCount += 1
                 _ = msg
+                return true
             case .authExpired:
                 // Stop the drain for this cycle; the auth layer will retry
                 // when a fresh token is available.
                 try? queue.markFailed(mutation.id, error: "Session expired.", terminal: false)
+                return false
             }
         } catch {
             // Unknown / non-classified error — treat as transient.
             try? queue.markFailed(mutation.id, error: error.localizedDescription, terminal: false)
+            return false
         }
     }
 

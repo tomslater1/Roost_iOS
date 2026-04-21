@@ -104,6 +104,25 @@ final class HomeManager {
         errorMessage = nil
     }
 
+    // MARK: - Optimistic patching
+    //
+    // Local, in-memory patches applied while a matching mutation is queued
+    // in the outbox. A follow-up `refreshCurrentHome()` (or realtime fire)
+    // reconciles with authoritative server state.
+
+    /// Patches `personalIncome` and `incomeSetAt` on the member matching `userID`.
+    func patchMemberIncome(userID: UUID, amount: Decimal) {
+        guard let idx = members.firstIndex(where: { $0.userID == userID }) else { return }
+        members[idx].personalIncome = amount
+        members[idx].incomeSetAt = Date()
+    }
+
+    /// Patches `incomeVisibleToPartner` on the member matching `userID`.
+    func patchMemberIncomeVisibility(userID: UUID, visible: Bool) {
+        guard let idx = members.firstIndex(where: { $0.userID == userID }) else { return }
+        members[idx].incomeVisibleToPartner = visible
+    }
+
     static func previewDashboard() -> HomeManager {
         let manager = HomeManager()
         let homeId = UUID(uuidString: "11111111-1111-1111-1111-111111111111") ?? UUID()

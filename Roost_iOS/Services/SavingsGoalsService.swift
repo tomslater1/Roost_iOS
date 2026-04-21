@@ -26,6 +26,19 @@ struct SavingsGoalsService {
             .value
     }
 
+    /// Insert path that accepts a client-supplied UUID. Used by the offline
+    /// mutation queue so local cache rows and server rows share a PK.
+    func insertGoal(_ goal: InsertSavingsGoal) async throws -> SavingsGoal {
+        let client = try SupabaseClientProvider.shared.requireClient()
+        return try await client
+            .from("savings_goals")
+            .insert(goal)
+            .select()
+            .single()
+            .execute()
+            .value
+    }
+
     /// Adds an amount to current_amount by fetching the current value first,
     /// then updating with the new total (PostgREST does not support column increments).
     func addToGoal(id: UUID, amount: Decimal) async throws -> SavingsGoal {

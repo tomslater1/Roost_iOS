@@ -38,6 +38,7 @@ struct MoneySpendingView: View {
     @Environment(MemberNamesHelper.self) private var memberNames
     @Environment(ScrambleModeEnvironment.self) private var scramble
     @Environment(HazelViewModel.self) private var hazelVM
+    @Environment(SyncStatusStore.self) private var syncStatusStore
 
     @State private var expandedCategory: String? = nil
     @State private var showAllForCategories: Set<String> = []
@@ -277,6 +278,25 @@ struct MoneySpendingView: View {
                     try? await Task.sleep(for: .seconds(4))
                     showHazelFreeTease = false
                 }
+            }
+        }
+        // Hazel deferred categorisation — when the outbox drains (e.g. after
+        // reconnecting from offline), any expenses that were created without
+        // a category get picked up by `bulkCategorizeUncategorized`. Gated on
+        // Pro + Hazel-enabled so free users never pay for AI calls.
+        .onChange(of: syncStatusStore.drainCompletedCount) { _, _ in
+            guard let homeId = homeManager.homeId,
+                  let myUserId = homeManager.currentUserId,
+                  !isFreeTier,
+                  hazelVM.expensesEnabled else { return }
+            let budgetCategories = budgetVM.lifestyleLines.map(\.name)
+            Task {
+                await expensesVM.bulkCategorizeUncategorized(
+                    homeId: homeId,
+                    myUserId: myUserId,
+                    partnerUserId: nil,
+                    budgetCategoryNames: budgetCategories
+                )
             }
         }
     }

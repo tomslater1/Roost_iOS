@@ -34,6 +34,12 @@ final class BudgetViewModel {
     private let expenseService = ExpenseService()
 
     @ObservationIgnored
+    private let budgetRepository = BudgetRepository()
+
+    @ObservationIgnored
+    private let expenseRepository = ExpenseRepository()
+
+    @ObservationIgnored
     private var budgetSubscriptionId: UUID?
 
     @ObservationIgnored
@@ -141,14 +147,25 @@ final class BudgetViewModel {
         isLoading = true
         errorMessage = nil
 
+        // Cache-first: paint UI from SwiftData immediately so the screen is
+        // useful offline and on cold launch. A server refresh follows.
         do {
-            async let budgetsResult = budgetService.fetchBudgets(for: homeId)
-            async let categoriesResult = budgetService.fetchCustomCategories(for: homeId)
-            async let expensesResult = expenseService.fetchExpenses(for: homeId)
+            budgets = try budgetRepository.loadCached(homeID: homeId)
+            customCategories = try budgetRepository.loadCachedCustomCategories(homeID: homeId)
+            expenses = try expenseRepository.loadCached(homeID: homeId)
+        } catch {
+            // Cache miss is non-fatal; fall through to the server refresh.
+        }
 
-            budgets = try await budgetsResult
-            customCategories = try await categoriesResult
-            expenses = try await expensesResult
+        do {
+            async let budgetsRefresh: Void = budgetRepository.refresh(homeID: homeId)
+            async let categoriesRefresh: Void = budgetRepository.refreshCustomCategories(homeID: homeId)
+            async let expensesRefresh: Void = expenseRepository.refresh(homeID: homeId)
+            _ = try await (budgetsRefresh, categoriesRefresh, expensesRefresh)
+
+            budgets = try budgetRepository.loadCached(homeID: homeId)
+            customCategories = try budgetRepository.loadCachedCustomCategories(homeID: homeId)
+            expenses = try expenseRepository.loadCached(homeID: homeId)
         } catch {
             if !isCancellation(error) {
                 errorMessage = String(describing: error)
@@ -174,16 +191,34 @@ final class BudgetViewModel {
 
         let targetMonth = normalizedMonth(month ?? selectedMonth)
 
-        let payload = UpsertBudget(
-            homeID: homeId,
-            category: trimmedCategory,
-            amount: amount,
-            month: targetMonth
-        )
-
         do {
-            let savedBudget = try await budgetService.upsertBudget(payload)
-            upsertLocalBudget(savedBudget, for: targetMonth)
+            // Optimistic cache write (marks dirty by natural key).
+            let localBudget = try budgetRepository.applyOptimisticBudgetUpsert(
+                homeID: homeId,
+                category: trimmedCategory,
+                amount: amount,
+                month: targetMonth,
+                pendingOperation: "upsert"
+            )
+            upsertLocalBudget(localBudget, for: targetMonth)
+
+            // Enqueue for replay.
+            let payload = BudgetUpsertPayload(
+                localID: localBudget.id,
+                homeID: homeId,
+                category: trimmedCategory,
+                amount: amount,
+                month: targetMonth
+            )
+            try OfflineAwareWrite.enqueue(
+                .init(
+                    entityType: "budget",
+                    operation: "upsert",
+                    targetID: localBudget.id,
+                    homeID: homeId,
+                    payload: try JSONEncoder.mutation.encode(payload)
+                )
+            )
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
@@ -204,7 +239,16 @@ final class BudgetViewModel {
         budgets.removeAll { $0.id == budget.id }
 
         do {
-            try await budgetService.deleteBudget(id: budget.id)
+            try budgetRepository.applyOptimisticBudgetDelete(budgetID: budget.id)
+            try OfflineAwareWrite.enqueue(
+                .init(
+                    entityType: "budget",
+                    operation: "delete",
+                    targetID: budget.id,
+                    homeID: homeId,
+                    payload: Data()
+                )
+            )
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
@@ -225,20 +269,37 @@ final class BudgetViewModel {
     func copyBudgetsFromPreviousMonth(into month: Date, homeId: UUID, userId: UUID) async {
         let copyable = copyableBudgetsFromPreviousMonth(into: month)
         guard !copyable.isEmpty else { return }
+        let targetMonth = normalizedMonth(month)
 
         do {
             for budget in copyable {
-                _ = try await budgetService.upsertBudget(
-                    UpsertBudget(
+                let localBudget = try budgetRepository.applyOptimisticBudgetUpsert(
+                    homeID: homeId,
+                    category: budget.category,
+                    amount: budget.amount,
+                    month: targetMonth,
+                    pendingOperation: "upsert"
+                )
+                upsertLocalBudget(localBudget, for: targetMonth)
+
+                let payload = BudgetUpsertPayload(
+                    localID: localBudget.id,
+                    homeID: homeId,
+                    category: budget.category,
+                    amount: budget.amount,
+                    month: targetMonth
+                )
+                try OfflineAwareWrite.enqueue(
+                    .init(
+                        entityType: "budget",
+                        operation: "upsert",
+                        targetID: localBudget.id,
                         homeID: homeId,
-                        category: budget.category,
-                        amount: budget.amount,
-                        month: normalizedMonth(month)
+                        payload: try JSONEncoder.mutation.encode(payload)
                     )
                 )
             }
 
-            await refreshBudgets(homeId: homeId)
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
@@ -267,10 +328,31 @@ final class BudgetViewModel {
         }
 
         do {
-            let created = try await budgetService.createCustomCategory(
-                CreateCustomCategory(homeID: homeId, name: trimmedName, emoji: emoji, color: color)
+            let created = try budgetRepository.applyOptimisticCategoryInsert(
+                homeID: homeId,
+                name: trimmedName,
+                emoji: emoji,
+                color: color,
+                pendingOperation: "create"
             )
             customCategories.append(created)
+
+            let payload = CustomCategoryCreatePayload(
+                localID: created.id,
+                homeID: homeId,
+                name: trimmedName,
+                emoji: emoji,
+                color: color
+            )
+            try OfflineAwareWrite.enqueue(
+                .init(
+                    entityType: "budget_category",
+                    operation: "category_create",
+                    targetID: created.id,
+                    homeID: homeId,
+                    payload: try JSONEncoder.mutation.encode(payload)
+                )
+            )
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
@@ -295,10 +377,29 @@ final class BudgetViewModel {
 
         do {
             for budget in relatedBudgets {
-                try await budgetService.deleteBudget(id: budget.id)
+                try budgetRepository.applyOptimisticBudgetDelete(budgetID: budget.id)
+                try OfflineAwareWrite.enqueue(
+                    .init(
+                        entityType: "budget",
+                        operation: "delete",
+                        targetID: budget.id,
+                        homeID: homeId,
+                        payload: Data()
+                    )
+                )
             }
 
-            try await budgetService.deleteCustomCategory(id: category.id)
+            try budgetRepository.applyOptimisticCategoryDelete(categoryID: category.id)
+            try OfflineAwareWrite.enqueue(
+                .init(
+                    entityType: "budget_category",
+                    operation: "category_delete",
+                    targetID: category.id,
+                    homeID: homeId,
+                    payload: Data()
+                )
+            )
+
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
@@ -408,7 +509,8 @@ final class BudgetViewModel {
 
     private func refreshBudgets(homeId: UUID) async {
         do {
-            budgets = try await budgetService.fetchBudgets(for: homeId)
+            try await budgetRepository.refresh(homeID: homeId)
+            budgets = try budgetRepository.loadCached(homeID: homeId)
         } catch {
             if !isCancellation(error) {
                 errorMessage = String(describing: error)
@@ -418,7 +520,8 @@ final class BudgetViewModel {
 
     private func refreshCategories(homeId: UUID) async {
         do {
-            customCategories = try await budgetService.fetchCustomCategories(for: homeId)
+            try await budgetRepository.refreshCustomCategories(homeID: homeId)
+            customCategories = try budgetRepository.loadCachedCustomCategories(homeID: homeId)
         } catch {
             if !isCancellation(error) {
                 errorMessage = String(describing: error)
@@ -428,7 +531,8 @@ final class BudgetViewModel {
 
     private func refreshExpenses(homeId: UUID) async {
         do {
-            expenses = try await expenseService.fetchExpenses(for: homeId)
+            try await expenseRepository.refresh(homeID: homeId)
+            expenses = try expenseRepository.loadCached(homeID: homeId)
         } catch {
             if !isCancellation(error) {
                 errorMessage = String(describing: error)

@@ -104,6 +104,13 @@ struct RoostApp: App {
                         networkMonitor: networkMonitor,
                         authManager: authManager
                     )
+                    // Phase 2 — register per-domain mutation handlers. Each
+                    // handler owns the replay path for one `entityType`.
+                    SyncCoordinator.shared.register(ExpenseMutationHandler())
+                    SyncCoordinator.shared.register(BudgetMutationHandler())
+                    SyncCoordinator.shared.register(CustomCategoryMutationHandler())
+                    SyncCoordinator.shared.register(SavingsGoalMutationHandler())
+                    SyncCoordinator.shared.register(HouseholdIncomeMutationHandler())
                     await SyncCoordinator.shared.drainIfOnline()
                 }
                 .onChange(of: authManager.currentUser?.id) { _, userId in

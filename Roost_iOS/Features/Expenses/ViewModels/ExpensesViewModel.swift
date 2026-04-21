@@ -19,6 +19,9 @@ final class ExpensesViewModel {
     private let hazelService = HazelService()
 
     @ObservationIgnored
+    private let repository = ExpenseRepository()
+
+    @ObservationIgnored
     private var realtimeSubscriptionId: UUID?
 
     @ObservationIgnored
@@ -45,15 +48,30 @@ final class ExpensesViewModel {
         )
     }
 
+    /// Cache-first load: paint from SwiftData immediately so the screen
+    /// renders without waiting for the network, then refresh in the
+    /// background. On offline, the refresh silently fails and the cached
+    /// snapshot is the user-visible state.
     func loadExpenses(homeId: UUID) async {
         isLoading = true
         errorMessage = nil
 
+        // 1. Paint from cache.
+        if let cached = try? repository.loadCached(homeID: homeId) {
+            expenses = cached
+        }
+
+        // 2. Refresh from network if possible.
         do {
-            expenses = try await expenseService.fetchExpenses(for: homeId)
+            try await repository.refresh(homeID: homeId)
+            expenses = (try? repository.loadCached(homeID: homeId)) ?? expenses
         } catch {
             if !isCancellation(error) {
-                errorMessage = String(describing: error)
+                // Cache is already painted; only surface the error when there
+                // was no cached fallback to render.
+                if expenses.isEmpty {
+                    errorMessage = String(describing: error)
+                }
             }
         }
 
@@ -82,7 +100,10 @@ final class ExpensesViewModel {
         var resolvedTitle = trimmedTitle
         var resolvedCategory = category?.isEmpty == true ? nil : category
 
-        // Hazel expense categorization is Pro-only
+        // Hazel expense categorisation is Pro-only. When online we run it
+        // synchronously; when offline, we skip it (an offline-created expense
+        // lands uncategorised and the user can edit it later, or run bulk
+        // categorisation after reconnect).
         if hazelEnabled, isPro, resolvedCategory == nil {
             let hazelCategories: [String] = budgetCategoryNames.isEmpty
                 ? Array(Set(
@@ -112,7 +133,11 @@ final class ExpensesViewModel {
         dateFormatter.formatOptions = [.withFullDate]
         let dateString = dateFormatter.string(from: incurredOn)
 
-        let createExpense = CreateExpense(
+        // Client-supplied UUID — survives the offline → online round trip.
+        let clientID = UUID()
+
+        let insert = InsertExpense(
+            id: clientID,
             homeID: homeId,
             title: resolvedTitle,
             amount: amount,
@@ -124,30 +149,60 @@ final class ExpensesViewModel {
             isRecurring: isRecurring ? true : nil
         )
 
-        // Build splits based on split type
-        var splits: [CreateExpenseSplit] = []
-        if splitType == "equal" {
-            let halfAmount = amount / 2
-            // Payer's split — settled immediately
-            splits.append(CreateExpenseSplit(
-                userID: paidByUserId,
-                amount: halfAmount,
-                settledAt: Date()
-            ))
-            // Other person's split — unsettled
-            let otherUserId = (paidByUserId == myUserId) ? partnerUserId : myUserId
-            splits.append(CreateExpenseSplit(
-                userID: otherUserId,
-                amount: halfAmount,
-                settledAt: nil
-            ))
+        // Build splits based on split type.
+        let createSplits: [CreateExpenseSplit] = makeCreateSplits(
+            amount: amount,
+            splitType: splitType,
+            paidByUserId: paidByUserId,
+            myUserId: myUserId,
+            partnerUserId: partnerUserId
+        )
+
+        let optimisticExpense = Expense(
+            id: clientID,
+            homeID: homeId,
+            title: resolvedTitle,
+            amount: amount,
+            paidBy: paidByUserId,
+            splitType: splitType,
+            category: resolvedCategory,
+            notes: notes?.isEmpty == true ? nil : notes,
+            incurredOn: dateString,
+            isRecurring: isRecurring ? true : nil,
+            createdAt: Date()
+        )
+        let optimisticSplits: [ExpenseSplit] = createSplits.map { split in
+            ExpenseSplit(
+                id: UUID(),
+                expenseID: clientID,
+                userID: split.userID,
+                amount: split.amount,
+                settledAt: split.settledAt,
+                settled: split.settledAt != nil
+            )
         }
-        // Solo: no splits
 
         do {
-            _ = try await expenseService.createExpense(createExpense, splits: splits)
-            // Reload to get the full ExpenseWithSplits from server
-            await loadExpenses(homeId: homeId)
+            try repository.applyOptimisticUpsert(
+                expense: optimisticExpense,
+                splits: optimisticSplits,
+                pendingOperation: "create"
+            )
+            let payload = ExpenseCreatePayload(
+                expense: insert,
+                splits: createSplits.map(CreateExpenseSplitPayload.init)
+            )
+            let payloadData = try JSONEncoder.mutation.encode(payload)
+            try OfflineAwareWrite.enqueue(OfflineAwareWrite.Intent(
+                entityType: "expense",
+                operation: "create",
+                targetID: clientID,
+                homeID: homeId,
+                payload: payloadData
+            ))
+
+            // Optimistic UI refresh from cache.
+            expenses = (try? repository.loadCached(homeID: homeId)) ?? expenses
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: myUserId.uuidString,
@@ -162,22 +217,26 @@ final class ExpensesViewModel {
     }
 
     func deleteExpense(_ expense: ExpenseWithSplits, homeId: UUID, userId: UUID) async {
-        guard let index = expenses.firstIndex(where: { $0.id == expense.id }) else { return }
-
-        // Optimistic
-        let removed = expenses.remove(at: index)
+        guard expenses.firstIndex(where: { $0.id == expense.id }) != nil else { return }
 
         do {
-            try await expenseService.deleteExpense(id: removed.id)
+            try repository.applyOptimisticDelete(expenseID: expense.id)
+            try OfflineAwareWrite.enqueue(OfflineAwareWrite.Intent(
+                entityType: "expense",
+                operation: "delete",
+                targetID: expense.id,
+                homeID: homeId,
+                payload: Data() // targetID is all the delete replay needs
+            ))
+            expenses = (try? repository.loadCached(homeID: homeId)) ?? expenses.filter { $0.id != expense.id }
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: userId.uuidString,
-                action: "removed expense \(removed.title)",
+                action: "removed expense \(expense.title)",
                 entityType: "expense",
-                entityId: removed.id.uuidString
+                entityId: expense.id.uuidString
             )
         } catch {
-            expenses.insert(removed, at: min(index, expenses.count))
             if !isCancellation(error) {
                 errorMessage = String(describing: error)
             }
@@ -198,7 +257,7 @@ final class ExpensesViewModel {
         partnerUserId: UUID,
         isRecurring: Bool = false
     ) async {
-        guard let index = expenses.firstIndex(where: { $0.id == original.id }) else { return }
+        guard expenses.firstIndex(where: { $0.id == original.id }) != nil else { return }
 
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedTitle.isEmpty, amount > 0 else { return }
@@ -235,26 +294,25 @@ final class ExpensesViewModel {
             updatedSplits = original.expenseSplits
         }
 
-        let optimisticExpense = ExpenseWithSplits(
-            id: original.id,
-            homeID: original.homeID,
-            title: trimmedTitle,
-            amount: amount,
-            paidBy: paidByUserId,
-            splitType: splitType,
-            category: category?.isEmpty == true ? nil : category,
-            notes: notes?.isEmpty == true ? nil : notes,
-            incurredOn: dateString,
-            isRecurring: isRecurring ? true : nil,
-            createdAt: original.createdAt,
-            expenseSplits: updatedSplits
-        )
-
-        expenses[index] = optimisticExpense
-
         do {
-            let confirmedExpense = try await expenseService.replaceExpense(updatedExpense, splits: updatedSplits.toCreateSplits())
-            expenses[index] = confirmedExpense
+            try repository.applyOptimisticUpsert(
+                expense: updatedExpense,
+                splits: updatedSplits,
+                pendingOperation: "update"
+            )
+            let payload = ExpenseUpdatePayload(
+                expense: updatedExpense,
+                splits: updatedSplits.toCreateSplits().map(CreateExpenseSplitPayload.init)
+            )
+            let payloadData = try JSONEncoder.mutation.encode(payload)
+            try OfflineAwareWrite.enqueue(OfflineAwareWrite.Intent(
+                entityType: "expense",
+                operation: "update",
+                targetID: original.id,
+                homeID: homeId,
+                payload: payloadData
+            ))
+            expenses = (try? repository.loadCached(homeID: homeId)) ?? expenses
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: myUserId.uuidString,
@@ -263,7 +321,6 @@ final class ExpensesViewModel {
                 entityId: original.id.uuidString
             )
         } catch {
-            expenses[index] = original
             if !isCancellation(error) {
                 errorMessage = String(describing: error)
             }
@@ -278,17 +335,38 @@ final class ExpensesViewModel {
         note: String?,
         myUserId: UUID
     ) async {
+        // Collect expense IDs whose splits this settlement will affect —
+        // those are the unsettled splits between the two users in the home.
+        let affectedExpenseIDs: [UUID] = expenses.compactMap { ews in
+            guard ews.homeID == homeId else { return nil }
+            let hasUnsettledSplit = ews.expenseSplits.contains { split in
+                (split.settledAt == nil)
+                    && ((split.userID == fromUserId && ews.paidBy == toUserId)
+                        || (split.userID == toUserId && ews.paidBy == fromUserId))
+            }
+            return hasUnsettledSplit ? ews.id : nil
+        }
+
         do {
-            try await expenseService.settleUp(
+            try repository.applyOptimisticSettlement(affectedExpenseIDs: affectedExpenseIDs)
+            let payload = ExpenseSettlementPayload(
                 homeID: homeId,
                 paidBy: fromUserId,
                 paidTo: toUserId,
                 amount: amount,
-                note: note?.isEmpty == true ? nil : note
+                note: note?.isEmpty == true ? nil : note,
+                affectedExpenseIDs: affectedExpenseIDs
             )
+            let payloadData = try JSONEncoder.mutation.encode(payload)
+            try OfflineAwareWrite.enqueue(OfflineAwareWrite.Intent(
+                entityType: "expense",
+                operation: "settlement",
+                targetID: homeId, // settlements don't target a single expense
+                homeID: homeId,
+                payload: payloadData
+            ))
             settleUpSuccess = true
-            // Reload to reflect settled splits
-            await loadExpenses(homeId: homeId)
+            expenses = (try? repository.loadCached(homeID: homeId)) ?? expenses
             ActivityService.logActivity(
                 homeId: homeId.uuidString,
                 userId: myUserId.uuidString,
@@ -404,6 +482,22 @@ final class ExpensesViewModel {
                 settledAt: nil,
                 settled: false
             )
+        ]
+    }
+
+    private func makeCreateSplits(
+        amount: Decimal,
+        splitType: String,
+        paidByUserId: UUID,
+        myUserId: UUID,
+        partnerUserId: UUID
+    ) -> [CreateExpenseSplit] {
+        guard splitType == "equal" else { return [] }
+        let halfAmount = amount / 2
+        let otherUserId = paidByUserId == myUserId ? partnerUserId : myUserId
+        return [
+            CreateExpenseSplit(userID: paidByUserId, amount: halfAmount, settledAt: Date()),
+            CreateExpenseSplit(userID: otherUserId, amount: halfAmount, settledAt: nil)
         ]
     }
 

@@ -231,7 +231,7 @@ private struct RootAuthenticatedView: View {
         async let activityLoad: Void = activityViewModel.loadActivity(homeId: homeId)
         async let pinboardLoad: Void = pinboardViewModel.load(homeId: homeId, userId: userId)
         async let templateLoad: Void = budgetTemplateViewModel.load(homeId: homeId)
-        async let monthlyLoad: Void = monthlyMoneyViewModel.loadSummary(homeId: homeId)
+        async let monthlyLoad: Void = monthlyMoneyViewModel.loadSummary(homeId: homeId, members: homeManager.members)
         async let settingsLoad: Void = moneySettingsViewModel.load(homeId: homeId)
         async let goalsLoad: Void = savingsGoalsViewModel.load(homeId: homeId)
 

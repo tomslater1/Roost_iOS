@@ -723,19 +723,44 @@ struct MoneySettingsView: View {
         guard let amount = Decimal(string: cleaned) else { return }
 
         isSavingIncome = true
+        let startOfMonth = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date())) ?? Date()
+
+        // Optimistic in-memory patch — UI updates immediately; a follow-up
+        // refreshCurrentHome() will reconcile once the mutation replays.
+        homeManager.patchMemberIncome(userID: userId, amount: amount)
+        incomeSetAt = homeManager.currentMember?.incomeSetAt
+
+        // Recompute combined total locally so the "household income" row
+        // reflects the new value offline. `fetchCombinedMemberIncome` would
+        // fail offline; compute from cached members instead.
+        householdIncomeTotal = homeManager.members.reduce(Decimal(0)) { total, member in
+            total + (member.personalIncome ?? 0)
+        }
+
+        let payload = HouseholdIncomeSetMyIncomePayload(
+            userID: userId,
+            amount: amount,
+            homeID: homeId,
+            month: startOfMonth
+        )
+
         do {
-            try await incomeService.setMyIncome(userId: userId, amount: amount)
-            let startOfMonth = Calendar.current.date(from: Calendar.current.dateComponents([.year, .month], from: Date())) ?? Date()
-            try await incomeService.syncCombinedIncome(homeId: homeId, month: startOfMonth)
-            await homeManager.refreshCurrentHome()
-            incomeSetAt = homeManager.currentMember?.incomeSetAt
-            householdIncomeTotal = try? await incomeService.fetchCombinedMemberIncome(homeId: homeId)
-            partnerIncome = try? await incomeService.fetchPartnerIncome(homeId: homeId, currentUserId: userId)
+            try OfflineAwareWrite.enqueue(
+                .init(
+                    entityType: "household_income",
+                    operation: "set_my_income",
+                    targetID: userId,
+                    homeID: homeId,
+                    payload: try JSONEncoder.mutation.encode(payload)
+                )
+            )
             withAnimation { showSavedConfirmation = true }
             try? await Task.sleep(for: .seconds(2))
             withAnimation { showSavedConfirmation = false }
         } catch {
-            // Silently fail — UI stays as-is
+            // Enqueue failure (out of disk space etc.) — leave UI state
+            // reflecting the optimistic value; user will see the real state
+            // on next refresh.
         }
         isSavingIncome = false
     }
@@ -743,7 +768,32 @@ struct MoneySettingsView: View {
     private func saveIncomeVisibility(visible: Bool) async {
         guard let homeId = homeManager.homeId,
               let userId = homeManager.currentUserId else { return }
-        try? await incomeService.setIncomeVisibility(userId: userId, visible: visible)
+
+        // Optimistic patch of in-memory state.
+        homeManager.patchMemberIncomeVisibility(userID: userId, visible: visible)
+
+        let payload = HouseholdIncomeSetVisibilityPayload(
+            userID: userId,
+            visible: visible,
+            homeID: homeId
+        )
+
+        do {
+            try OfflineAwareWrite.enqueue(
+                .init(
+                    entityType: "household_income",
+                    operation: "set_visibility",
+                    targetID: userId,
+                    homeID: homeId,
+                    payload: try JSONEncoder.mutation.encode(payload)
+                )
+            )
+        } catch {
+            // Silently ignore — user will see corrected state on next refresh.
+        }
+
+        // Partner income visibility depends on BOTH partners' flags — only
+        // fetch when online; stale value is acceptable otherwise.
         partnerIncome = try? await incomeService.fetchPartnerIncome(homeId: homeId, currentUserId: userId)
     }
 }

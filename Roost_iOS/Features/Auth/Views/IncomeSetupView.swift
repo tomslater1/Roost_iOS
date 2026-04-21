@@ -157,9 +157,27 @@ struct IncomeSetupView: View {
               let myAmount else { return }
 
         isSaving = true
+
+        // Optimistic patch so downstream screens reflect the value even if
+        // the network is down. Replay will reconcile with the server.
+        homeManager.patchMemberIncome(userID: userId, amount: myAmount)
+
+        let payload = HouseholdIncomeSetMyIncomePayload(
+            userID: userId,
+            amount: myAmount,
+            homeID: homeId,
+            month: startOfMonth
+        )
         do {
-            try await incomeService.setMyIncome(userId: userId, amount: myAmount)
-            try await incomeService.syncCombinedIncome(homeId: homeId, month: startOfMonth)
+            try OfflineAwareWrite.enqueue(
+                .init(
+                    entityType: "household_income",
+                    operation: "set_my_income",
+                    targetID: userId,
+                    homeID: homeId,
+                    payload: try JSONEncoder.mutation.encode(payload)
+                )
+            )
         } catch {
             // Non-fatal — still complete setup
         }

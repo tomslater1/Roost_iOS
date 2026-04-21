@@ -13,6 +13,37 @@ struct ExpenseService {
             .value
     }
 
+    /// Insert path that accepts a client-supplied UUID. Used by the offline
+    /// mutation queue so local cache rows and server rows share a PK.
+    func insertExpense(_ expense: InsertExpense, splits: [CreateExpenseSplit]) async throws -> Expense {
+        let client = try SupabaseClientProvider.shared.requireClient()
+
+        let created: Expense = try await client
+            .from("expenses")
+            .insert(expense)
+            .select()
+            .single()
+            .execute()
+            .value
+
+        if !splits.isEmpty {
+            let splitsWithExpenseId = splits.map { split in
+                InsertExpenseSplit(
+                    expenseID: created.id,
+                    userID: split.userID,
+                    amount: split.amount,
+                    settledAt: split.settledAt
+                )
+            }
+            try await client
+                .from("expense_splits")
+                .insert(splitsWithExpenseId)
+                .execute()
+        }
+
+        return created
+    }
+
     func createExpense(_ expense: CreateExpense, splits: [CreateExpenseSplit]) async throws -> Expense {
         let client = try SupabaseClientProvider.shared.requireClient()
 

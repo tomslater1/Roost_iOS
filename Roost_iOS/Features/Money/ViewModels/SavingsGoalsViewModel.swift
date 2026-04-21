@@ -15,6 +15,9 @@ final class SavingsGoalsViewModel {
     private let service = SavingsGoalsService()
 
     @ObservationIgnored
+    private let repository = SavingsGoalRepository()
+
+    @ObservationIgnored
     private var subscriptionId: UUID?
 
     @ObservationIgnored
@@ -39,8 +42,17 @@ final class SavingsGoalsViewModel {
     func load(homeId: UUID) async {
         isLoading = true
         error = nil
+
+        // Cache-first paint.
         do {
-            goals = try await service.fetchGoals(homeId: homeId)
+            goals = try repository.loadCached(homeID: homeId)
+        } catch {
+            // Cache miss is not fatal.
+        }
+
+        do {
+            try await repository.refresh(homeID: homeId)
+            goals = try repository.loadCached(homeID: homeId)
         } catch {
             if !isCancellation(error) { self.error = error }
         }
@@ -51,16 +63,94 @@ final class SavingsGoalsViewModel {
 
     @discardableResult
     func addGoal(_ data: CreateSavingsGoal) async throws -> SavingsGoal {
-        let created = try await service.addGoal(data)
-        goals.append(created)
-        return created
+        let clientID = UUID()
+        let now = Date()
+        let optimistic = SavingsGoal(
+            id: clientID,
+            homeId: data.homeId,
+            name: data.name,
+            targetAmount: data.targetAmount,
+            savedAmount: data.savedAmount,
+            colour: data.colour,
+            icon: data.icon,
+            targetDate: data.targetDate,
+            isComplete: false,
+            completedAt: nil,
+            sortOrder: data.sortOrder,
+            monthlyContribution: data.monthlyContribution,
+            contributionDay: data.contributionDay,
+            budgetLineId: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        try repository.applyOptimisticInsert(optimistic)
+        goals.append(optimistic)
+
+        let payload = SavingsGoalCreatePayload(
+            goal: InsertSavingsGoal(
+                id: clientID,
+                homeId: data.homeId,
+                name: data.name,
+                targetAmount: data.targetAmount,
+                savedAmount: data.savedAmount,
+                colour: data.colour,
+                icon: data.icon,
+                targetDate: data.targetDate,
+                sortOrder: data.sortOrder,
+                monthlyContribution: data.monthlyContribution,
+                contributionDay: data.contributionDay
+            )
+        )
+        try OfflineAwareWrite.enqueue(
+            .init(
+                entityType: "savings_goal",
+                operation: "create",
+                targetID: clientID,
+                homeID: data.homeId,
+                payload: try JSONEncoder.mutation.encode(payload)
+            )
+        )
+        return optimistic
     }
 
     func addToGoal(id: UUID, amount: Decimal) async throws {
-        let updated = try await service.addToGoal(id: id, amount: amount)
+        // Optimistic additive update (capped at target locally).
+        try repository.applyOptimisticAddContribution(goalID: id, delta: amount)
         if let idx = goals.firstIndex(where: { $0.id == id }) {
-            goals[idx] = updated
+            let current = goals[idx]
+            let newSaved = min(current.targetAmount, current.savedAmount + amount)
+            let nowCompleted = newSaved >= current.targetAmount
+            goals[idx] = SavingsGoal(
+                id: current.id,
+                homeId: current.homeId,
+                name: current.name,
+                targetAmount: current.targetAmount,
+                savedAmount: newSaved,
+                colour: current.colour,
+                icon: current.icon,
+                targetDate: current.targetDate,
+                isComplete: nowCompleted || current.isComplete,
+                completedAt: (nowCompleted && !current.isComplete) ? Date() : current.completedAt,
+                sortOrder: current.sortOrder,
+                monthlyContribution: current.monthlyContribution,
+                contributionDay: current.contributionDay,
+                budgetLineId: current.budgetLineId,
+                createdAt: current.createdAt,
+                updatedAt: Date()
+            )
         }
+
+        let homeId = goals.first(where: { $0.id == id })?.homeId ?? UUID()
+        let payload = SavingsGoalContributionPayload(goalID: id, delta: amount, homeID: homeId)
+        try OfflineAwareWrite.enqueue(
+            .init(
+                entityType: "savings_goal",
+                operation: "add_contribution",
+                targetID: id,
+                homeID: homeId,
+                payload: try JSONEncoder.mutation.encode(payload)
+            )
+        )
     }
 
     func updateGoal(id: UUID, updates: [String: AnyJSON]) async throws {
@@ -71,6 +161,8 @@ final class SavingsGoalsViewModel {
     }
 
     func completeGoal(id: UUID) async throws {
+        // If the goal has a linked budget-template contribution, clearing it
+        // mutates another domain and needs the network; perform it online only.
         if let goal = goals.first(where: { $0.id == id }),
            let budgetLineId = goal.budgetLineId {
             let cleared = try await service.removeGoalContribution(goalId: id, budgetLineId: budgetLineId)
@@ -78,15 +170,41 @@ final class SavingsGoalsViewModel {
                 goals[idx] = cleared
             }
         }
-        let updated = try await service.completeGoal(id: id)
+
+        try repository.applyOptimisticComplete(goalID: id)
+        let homeId = goals.first(where: { $0.id == id })?.homeId ?? UUID()
         if let idx = goals.firstIndex(where: { $0.id == id }) {
-            goals[idx] = updated
+            var g = goals[idx]
+            g.isComplete = true
+            g.completedAt = g.completedAt ?? Date()
+            goals[idx] = g
         }
+
+        try OfflineAwareWrite.enqueue(
+            .init(
+                entityType: "savings_goal",
+                operation: "complete",
+                targetID: id,
+                homeID: homeId,
+                payload: Data()
+            )
+        )
     }
 
     func deleteGoal(id: UUID) async throws {
-        try await service.deleteGoal(id: id)
+        let homeId = goals.first(where: { $0.id == id })?.homeId ?? UUID()
+        try repository.applyOptimisticDelete(goalID: id)
         goals.removeAll { $0.id == id }
+
+        try OfflineAwareWrite.enqueue(
+            .init(
+                entityType: "savings_goal",
+                operation: "delete",
+                targetID: id,
+                homeID: homeId,
+                payload: Data()
+            )
+        )
     }
 
     func setGoalContribution(
@@ -155,8 +273,12 @@ final class SavingsGoalsViewModel {
     // MARK: - Private
 
     private func refresh(homeId: UUID) async {
-        guard let updated = try? await service.fetchGoals(homeId: homeId) else { return }
-        goals = updated
+        do {
+            try await repository.refresh(homeID: homeId)
+            goals = try repository.loadCached(homeID: homeId)
+        } catch {
+            // Silent on realtime refresh — keep current state.
+        }
     }
 
     private func isCancellation(_ error: Error) -> Bool {
