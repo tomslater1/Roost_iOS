@@ -91,6 +91,9 @@ struct RoostApp: App {
                 .onOpenURL { url in
                     authManager.handle(url: url)
                     notificationRouter.handle(url: url)
+                    // Shopping-trip completion deep link from the Live Activity
+                    // "Done" / "Log receipt" affordances.
+                    _ = ShoppingTripCompletionBridge.shared.handle(url: url)
                 }
                 .task {
                     authManager.startSessionListener()
@@ -114,6 +117,9 @@ struct RoostApp: App {
                     SyncCoordinator.shared.register(ShoppingMutationHandler())
                     SyncCoordinator.shared.register(ChoreMutationHandler())
                     await SyncCoordinator.shared.drainIfOnline()
+                    // Rebind to any Live Activity that was still running from
+                    // a previous app session (Shopping Trip).
+                    ShoppingTripManager.shared.restoreActiveActivityIfAny()
                 }
                 .onChange(of: authManager.currentUser?.id) { _, userId in
                     Task {

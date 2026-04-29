@@ -60,3 +60,10 @@ struct InsertShoppingItem: Codable, Hashable {
         case checked
     }
 }
+
+/// Payload wrapper for queued "create" shopping mutations. Lives here (not
+/// in `ShoppingMutationHandler.swift`) so the RoostWidgets extension can
+/// encode the same shape the main app's handler decodes.
+struct ShoppingCreatePayload: Codable {
+    var item: InsertShoppingItem
+}

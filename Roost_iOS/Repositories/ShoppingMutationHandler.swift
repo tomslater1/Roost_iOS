@@ -9,9 +9,8 @@ import Foundation
 //   - "update" — payload is the full `ShoppingItem` (LWW on the server)
 //   - "delete" — no payload, uses `mutation.targetID`
 
-struct ShoppingCreatePayload: Codable {
-    var item: InsertShoppingItem
-}
+// NOTE: `ShoppingCreatePayload` moved to `Models/ShoppingItem.swift` so it
+// can be shared with the RoostWidgets extension.
 
 @MainActor
 struct ShoppingMutationHandler: MutationHandler {

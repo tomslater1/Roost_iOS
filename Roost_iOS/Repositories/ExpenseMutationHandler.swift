@@ -218,22 +218,6 @@ struct ExpenseMutationHandler: MutationHandler {
     }
 }
 
-// MARK: - Shared encoder / decoder
-
-extension JSONEncoder {
-    /// Shared encoder for `PendingMutation.payloadData` across all handlers.
-    static let mutation: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }()
-}
-
-extension JSONDecoder {
-    /// Shared decoder for `PendingMutation.payloadData` across all handlers.
-    static let mutation: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
-}
+// NOTE: JSONEncoder.mutation / JSONDecoder.mutation moved to
+// `Shared/MutationCoding.swift` so they can be used from the RoostWidgets
+// extension as well.

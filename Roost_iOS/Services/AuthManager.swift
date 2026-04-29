@@ -101,8 +101,13 @@ final class AuthManager {
                 await refreshHomeStatus()
             }
 
+            // Mirror user + home into the shared App Group UserDefaults so the
+            // widget extension can read current context without touching auth.
+            updateSharedAppGroupContext()
+
         case .signedOut, .userDeleted:
             clearSessionState()
+            AppGroup.Context.clearAll()
 
         case .passwordRecovery, .mfaChallengeVerified:
             isRestoringSession = false
@@ -117,6 +122,7 @@ final class AuthManager {
         isRestoringSession = false
         pendingJoinCode = nil
         try? SyncEngine().clearAllCachedData()
+        AppGroup.Context.clearAll()
     }
 
     func refreshHomeStatus() async {
@@ -127,6 +133,18 @@ final class AuthManager {
             homeId = nil
             hasHome = false
         }
+        // Keep the shared App Group context in sync whenever home status changes.
+        updateSharedAppGroupContext()
+    }
+
+    /// Writes `currentUser.id`, `homeId`, and the display name into the shared
+    /// App Group UserDefaults so the RoostWidgets extension can read the
+    /// current auth context without hitting Supabase. Call this whenever any
+    /// of those values change.
+    func updateSharedAppGroupContext() {
+        AppGroup.Context.currentUserID = currentUser?.id
+        AppGroup.Context.currentHomeID = homeId
+        AppGroup.Context.currentUserDisplayName = currentUser?.displayName
     }
 
     func validAccessToken() async throws -> String {

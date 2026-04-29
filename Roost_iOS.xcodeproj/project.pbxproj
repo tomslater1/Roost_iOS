@@ -15,6 +15,9 @@
 		A10000000000000000000006 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000106 /* FirebaseMessaging */; };
 		A10000000000000000000007 /* SwiftDate in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000107 /* SwiftDate */; };
 		CF34273C2F93F11800F2228C /* RevenueCat in Frameworks */ = {isa = PBXBuildFile; productRef = CF34273B2F93F11800F2228C /* RevenueCat */; };
+		CFE0CF482F981896000A2CBD /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CFE0CF2A2F98165A000A2CBD /* WidgetKit.framework */; };
+		CFE0CF492F981896000A2CBD /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CFE0CF2C2F98165B000A2CBD /* SwiftUI.framework */; };
+		CFE0CF582F981899000A2CBD /* RoostWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CFE0CF472F981896000A2CBD /* RoostWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,7 +35,28 @@
 			remoteGlobalIDString = CF2F9AF62F74804E0013AAC9;
 			remoteInfo = Roost_iOS;
 		};
+		CFE0CF562F981899000A2CBD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CF2F9AEF2F74804E0013AAC9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CFE0CF462F981896000A2CBD;
+			remoteInfo = RoostWidgetsExtension;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		CFE0CF412F98165D000A2CBD /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				CFE0CF582F981899000A2CBD /* RoostWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		A10000000000000000000030 /* RoostTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RoostTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -40,6 +64,10 @@
 		A10000000000000000000034 /* Roost_iOS/Config/Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Roost_iOS/Config/Secrets.xcconfig; sourceTree = "<group>"; };
 		CF2F9AF72F74804E0013AAC9 /* Roost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Roost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF2FA20E2F7492A50013AAC9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		CFE0CF2A2F98165A000A2CBD /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		CFE0CF2C2F98165B000A2CBD /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
+		CFE0CF472F981896000A2CBD /* RoostWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = RoostWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		CFE0CF5D2F9818BF000A2CBD /* RoostWidgetsExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RoostWidgetsExtension.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -49,6 +77,38 @@
 				Config/Secrets.xcconfig,
 			);
 			target = CF2F9AF62F74804E0013AAC9 /* Roost_iOS */;
+		};
+		CFE0CF5C2F981899000A2CBD /* Exceptions for "RoostWidgets" folder in "RoostWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = CFE0CF462F981896000A2CBD /* RoostWidgetsExtension */;
+		};
+		CFE0D4072F981F66000A2CBD /* Exceptions for "Roost_iOS" folder in "RoostWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Design/DesignSystem.swift,
+				LocalData/DeviceIdentity.swift,
+				LocalData/LocalDataManager.swift,
+				LocalData/MutationQueue.swift,
+				LocalData/SwiftDataModels.swift,
+				Models/ActivityFeedItem.swift,
+				Models/Budget.swift,
+				Models/Chore.swift,
+				Models/Expense.swift,
+				Models/Home.swift,
+				Models/HouseholdIncome.swift,
+				Models/Room.swift,
+				Models/SavingsGoal.swift,
+				Models/ShoppingItem.swift,
+				Shared/AppGroup.swift,
+				Shared/MutationCoding.swift,
+				Shared/SharedShoppingReader.swift,
+				Shared/ShoppingItemDisplay.swift,
+				Shared/ShoppingTripAttributes.swift,
+			);
+			target = CFE0CF462F981896000A2CBD /* RoostWidgetsExtension */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -67,8 +127,17 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				CF583B872F8CE6CB0032004C /* Exceptions for "Roost_iOS" folder in "Roost_iOS" target */,
+				CFE0D4072F981F66000A2CBD /* Exceptions for "Roost_iOS" folder in "RoostWidgetsExtension" target */,
 			);
 			path = Roost_iOS;
+			sourceTree = "<group>";
+		};
+		CFE0CF4A2F981896000A2CBD /* RoostWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				CFE0CF5C2F981899000A2CBD /* Exceptions for "RoostWidgets" folder in "RoostWidgetsExtension" target */,
+			);
+			path = RoostWidgets;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -103,15 +172,26 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CFE0CF442F981896000A2CBD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CFE0CF492F981896000A2CBD /* SwiftUI.framework in Frameworks */,
+				CFE0CF482F981896000A2CBD /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		CF2F9AEE2F74804E0013AAC9 = {
 			isa = PBXGroup;
 			children = (
+				CFE0CF5D2F9818BF000A2CBD /* RoostWidgetsExtension.entitlements */,
 				CF2F9AF92F74804E0013AAC9 /* Roost_iOS */,
 				A10000000000000000000032 /* RoostTests */,
 				A10000000000000000000033 /* RoostUITests */,
+				CFE0CF4A2F981896000A2CBD /* RoostWidgets */,
 				CF2F9AF82F74804E0013AAC9 /* Products */,
 				CF2FA1082F7491760013AAC9 /* Recovered References */,
 				CF2FA20E2F7492A50013AAC9 /* Info.plist */,
@@ -125,6 +205,7 @@
 				CF2F9AF72F74804E0013AAC9 /* Roost.app */,
 				A10000000000000000000030 /* RoostTests.xctest */,
 				A10000000000000000000031 /* RoostUITests.xctest */,
+				CFE0CF472F981896000A2CBD /* RoostWidgetsExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -140,6 +221,8 @@
 		CF34273A2F93F11800F2228C /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				CFE0CF2A2F98165A000A2CBD /* WidgetKit.framework */,
+				CFE0CF2C2F98165B000A2CBD /* SwiftUI.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -200,10 +283,12 @@
 				CF2F9AF32F74804E0013AAC9 /* Sources */,
 				CF2F9AF42F74804E0013AAC9 /* Frameworks */,
 				CF2F9AF52F74804E0013AAC9 /* Resources */,
+				CFE0CF412F98165D000A2CBD /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				CFE0CF572F981899000A2CBD /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				CF2F9AF92F74804E0013AAC9 /* Roost_iOS */,
@@ -223,6 +308,28 @@
 			productReference = CF2F9AF72F74804E0013AAC9 /* Roost.app */;
 			productType = "com.apple.product-type.application";
 		};
+		CFE0CF462F981896000A2CBD /* RoostWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFE0CF592F981899000A2CBD /* Build configuration list for PBXNativeTarget "RoostWidgetsExtension" */;
+			buildPhases = (
+				CFE0CF432F981896000A2CBD /* Sources */,
+				CFE0CF442F981896000A2CBD /* Frameworks */,
+				CFE0CF452F981896000A2CBD /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				CFE0CF4A2F981896000A2CBD /* RoostWidgets */,
+			);
+			name = RoostWidgetsExtension;
+			packageProductDependencies = (
+			);
+			productName = RoostWidgetsExtension;
+			productReference = CFE0CF472F981896000A2CBD /* RoostWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -230,7 +337,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2630;
+				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					A10000000000000000000050 = {
@@ -243,6 +350,9 @@
 					};
 					CF2F9AF62F74804E0013AAC9 = {
 						CreatedOnToolsVersion = 26.3;
+					};
+					CFE0CF462F981896000A2CBD = {
+						CreatedOnToolsVersion = 26.4;
 					};
 				};
 			};
@@ -273,6 +383,7 @@
 				CF2F9AF62F74804E0013AAC9 /* Roost_iOS */,
 				A10000000000000000000050 /* RoostTests */,
 				A10000000000000000000051 /* RoostUITests */,
+				CFE0CF462F981896000A2CBD /* RoostWidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
@@ -293,6 +404,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		CF2F9AF52F74804E0013AAC9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFE0CF452F981896000A2CBD /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -323,6 +441,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		CFE0CF432F981896000A2CBD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -335,6 +460,11 @@
 			isa = PBXTargetDependency;
 			target = CF2F9AF62F74804E0013AAC9 /* Roost_iOS */;
 			targetProxy = A10000000000000000000021 /* PBXContainerItemProxy */;
+		};
+		CFE0CF572F981899000A2CBD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CFE0CF462F981896000A2CBD /* RoostWidgetsExtension */;
+			targetProxy = CFE0CF562F981899000A2CBD /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -634,6 +764,70 @@
 			};
 			name = Release;
 		};
+		CFE0CF5A2F981899000A2CBD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = RoostWidgetsExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7CAU82Q3B8;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RoostWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = RoostWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.pinehollow.roost.RoostWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		CFE0CF5B2F981899000A2CBD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = RoostWidgetsExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7CAU82Q3B8;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = RoostWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = RoostWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = studio.pinehollow.roost.RoostWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -669,6 +863,15 @@
 			buildConfigurations = (
 				CF2F9B032F74804F0013AAC9 /* Debug */,
 				CF2F9B042F74804F0013AAC9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CFE0CF592F981899000A2CBD /* Build configuration list for PBXNativeTarget "RoostWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFE0CF5A2F981899000A2CBD /* Debug */,
+				CFE0CF5B2F981899000A2CBD /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

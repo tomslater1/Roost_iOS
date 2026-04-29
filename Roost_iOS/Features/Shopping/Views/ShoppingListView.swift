@@ -9,6 +9,7 @@ struct ShoppingListView: View {
 
     @State private var showingAddItemPage = false
     @State private var showingNextShopSheet = false
+    @Bindable private var tripCompletionBridge = ShoppingTripCompletionBridge.shared
     @State private var collapsedCategories: Set<String> = []
     @State private var hasAppeared = false
     @State private var isClearingCompleted = false
@@ -69,6 +70,13 @@ struct ShoppingListView: View {
                 await saveNextShopDate(date)
             }
         }
+        .sheet(isPresented: $tripCompletionBridge.pendingCompletion) {
+            ShoppingTripCompletionSheet(
+                merchant: tripCompletionBridge.suggestedMerchant,
+                onDismiss: { tripCompletionBridge.clear() }
+            )
+            .presentationDetents([.medium])
+        }
         .conditionalRefreshable(!showingNextShopSheet) {
             let homeId = await MainActor.run { homeManager.homeId }
             guard let homeId else { return }
@@ -112,6 +120,15 @@ struct ShoppingListView: View {
             quickActionRail
                 .padding(.top, 12)
                 .shoppingEntrance(at: 2, hasAppeared: hasAppeared, reduceMotion: reduceMotion)
+
+            // Start / end a shopping-trip Live Activity. Shows on the lock
+            // screen + Dynamic Island so items can be checked off hands-free.
+            HStack {
+                ShoppingTripStartButton()
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 8)
+            .shoppingEntrance(at: 2, hasAppeared: hasAppeared, reduceMotion: reduceMotion)
 
             if viewModel.isLoading && viewModel.items.isEmpty {
                 loadingState

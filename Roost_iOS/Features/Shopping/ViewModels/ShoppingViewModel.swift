@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import Realtime
+import WidgetKit
 
 // MARK: - Offline-aware Shopping (Phase 3)
 //
@@ -154,6 +155,7 @@ final class ShoppingViewModel {
                 entityType: "shopping_item",
                 entityId: newID.uuidString
             )
+            notifyExternalSurfaces()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -190,6 +192,7 @@ final class ShoppingViewModel {
                 entityType: "shopping_item",
                 entityId: item.id.uuidString
             )
+            notifyExternalSurfaces()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -216,6 +219,7 @@ final class ShoppingViewModel {
                 entityType: "shopping_item",
                 entityId: removed.id.uuidString
             )
+            notifyExternalSurfaces()
         } catch {
             // Restore if enqueue itself failed (rare — SwiftData full).
             items.insert(removed, at: min(index, items.count))
@@ -238,6 +242,7 @@ final class ShoppingViewModel {
         ) { [weak self] in
             guard let self, let homeId = self.subscribedHomeId else { return }
             await self.loadItems(homeId: homeId)
+            self.notifyExternalSurfaces()
         }
     }
 
@@ -251,6 +256,13 @@ final class ShoppingViewModel {
     private func isCancellation(_ error: Error) -> Bool {
         (error as? URLError)?.code == .cancelled ||
         (error as NSError).code == NSURLErrorCancelled
+    }
+
+    /// Called after any local shopping-list write so widgets + the live
+    /// activity reflect the latest state.
+    private func notifyExternalSurfaces() {
+        WidgetCenter.shared.reloadTimelines(ofKind: "ShoppingWidget")
+        ShoppingTripManager.shared.refreshActiveActivity()
     }
 
     private func isNetworkFailure(_ error: Error) -> Bool {

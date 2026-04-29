@@ -48,6 +48,10 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Roost uses Face ID to protect your financial information.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
+	<true/>
 	<key>STRIPE_ANNUAL_PRICE_ID</key>
 	<string>$(STRIPE_ANNUAL_PRICE_ID)</string>
 	<key>STRIPE_CHECKOUT_ENDPOINT</key>
