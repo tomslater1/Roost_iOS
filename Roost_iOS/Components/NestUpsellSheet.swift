@@ -37,6 +37,21 @@ struct ProFeatureContext {
         title: "Room Groups",
         description: "Organise your home by room so chores and shopping are easier to manage."
     )
+    static let choreSuggestions = ProFeatureContext(
+        icon: "lightbulb.fill",
+        title: "AI Chore Suggestions",
+        description: "Hazel suggests new chores for the month based on your household routine."
+    )
+    static let hazelBulkCategorize = ProFeatureContext(
+        icon: "sparkles",
+        title: "Smart Expense Sorting",
+        description: "Let Hazel automatically categorize all your uncategorized expenses in one tap."
+    )
+    static let hazelInsights = ProFeatureContext(
+        icon: "sparkles",
+        title: "Hazel Budget Insights",
+        description: "Get AI-written plain-English summaries of your monthly spending."
+    )
 }
 
 // Backward compatibility
@@ -76,10 +91,10 @@ struct ProUpsellSheet: View {
     }
 
     private let proHighlights: [(icon: String, title: String)] = [
-        ("sparkles",             "Hazel AI — auto-categorize and tidy"),
+        ("sparkles",             "Hazel AI — categorize, narrate, and sort"),
+        ("lightbulb.fill",       "AI chore suggestions each month"),
         ("calendar.badge.clock", "Full budget history, every month"),
         ("chart.pie.fill",       "Advanced budgeting with category limits"),
-        ("bell.badge.fill",      "Smart chore and expense notifications"),
         ("square.grid.2x2.fill", "Room groups for organised chores"),
         ("person.2.fill",        "Unlimited household members"),
     ]

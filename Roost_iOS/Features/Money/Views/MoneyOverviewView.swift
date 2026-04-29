@@ -11,11 +11,17 @@ struct MoneyOverviewView: View {
     @Environment(MonthlyMoneyViewModel.self) private var summaryVM
     @Environment(MoneySettingsViewModel.self) private var settingsVM
     @Environment(ScrambleModeEnvironment.self) private var scramble
+    @Environment(HazelViewModel.self) private var hazelVM
 
     @State private var arcProgress: CGFloat = 0
     @State private var showHistoryUpsell = false
     @State private var showInsightsUpsell = false
     @State private var pastBillsExpanded = false
+
+    // Hazel Budget Insights (Pro)
+    @State private var hazelInsight: HazelBudgetInsight?
+    @State private var hazelInsightLoading = false
+    @ObservationIgnored private let insightsService = BudgetInsightsService()
 
     // MARK: - Derived helpers
 
@@ -228,6 +234,78 @@ struct MoneyOverviewView: View {
         return "Set your income to unlock personalised monthly insights."
     }
 
+    // MARK: - Hazel Insights
+
+    private var monthLabel: String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "MMMM yyyy"
+        return fmt.string(from: currentMonth)
+    }
+
+    private var monthKeyForInsights: String {
+        "\(homeManager.homeId?.uuidString ?? "")-\(monthLabel)"
+    }
+
+    private var hazelInsightInput: HazelBudgetInsightInput? {
+        guard let summary = summaryVM.summary else { return nil }
+
+        let expenses = thisMonthExpensesAsExpense
+        let topCats: [HazelBudgetInsightInput.TopCategory] = budgetVM.lifestyleLines
+            .compactMap { line -> HazelBudgetInsightInput.TopCategory? in
+                let spend = NSDecimalNumber(decimal: budgetVM.getSpent(category: line.name, month: currentMonth, expenses: expenses)).doubleValue
+                guard spend > 0 else { return nil }
+                let limit = NSDecimalNumber(decimal: budgetVM.getEffectiveAmount(lineId: line.id, month: currentMonth)).doubleValue
+                let total = NSDecimalNumber(decimal: summary.actualSpend).doubleValue
+                let pct = total > 0 ? (spend / total) * 100 : 0
+                return HazelBudgetInsightInput.TopCategory(
+                    name: line.name,
+                    spend: spend,
+                    limit: limit > 0 ? limit : nil,
+                    pct: pct,
+                    recurringTotal: 0
+                )
+            }
+            .sorted { $0.spend > $1.spend }
+            .prefix(5)
+            .map { $0 }
+
+        let totalSpent = NSDecimalNumber(decimal: summary.actualSpend).doubleValue
+        let totalBudget = NSDecimalNumber(decimal: summary.totalBudgeted).doubleValue
+        let projected = NSDecimalNumber(decimal: summary.projectedTotal).doubleValue
+        let income = NSDecimalNumber(decimal: summary.income).doubleValue
+        let remaining = max(0, income - totalSpent)
+        let overspend = totalBudget > 0 ? max(0, totalSpent - totalBudget) : 0
+
+        return HazelBudgetInsightInput(
+            monthLabel: monthLabel,
+            totalSpent: totalSpent,
+            totalBudget: totalBudget,
+            projectedMonthEnd: projected,
+            remaining: remaining,
+            overspend: overspend,
+            topCategories: topCats
+        )
+    }
+
+    private func fetchHazelInsight() async {
+        guard !isFreeTier, hazelVM.insightsEnabled,
+              let homeId = homeManager.homeId,
+              let input = hazelInsightInput else { return }
+
+        if let cached = insightsService.cachedInsight(for: monthLabel) {
+            hazelInsight = cached
+            return
+        }
+
+        hazelInsightLoading = true
+        defer { hazelInsightLoading = false }
+
+        if let result = try? await insightsService.fetchInsights(homeId: homeId, input: input) {
+            hazelInsight = result
+            insightsService.cache(result, for: monthLabel)
+        }
+    }
+
     // MARK: - Helpers
 
     private func compact(_ value: Decimal) -> String {
@@ -330,6 +408,11 @@ struct MoneyOverviewView: View {
         }
         .nestUpsell(isPresented: $showHistoryUpsell, feature: .budgetHistory)
         .nestUpsell(isPresented: $showInsightsUpsell, feature: .budgetInsights)
+        .task(id: monthKeyForInsights) {
+            // Reset cached insight when month changes, then fetch fresh
+            hazelInsight = insightsService.cachedInsight(for: monthLabel)
+            await fetchHazelInsight()
+        }
     }
 }
 

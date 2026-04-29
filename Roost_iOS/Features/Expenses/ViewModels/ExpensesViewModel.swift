@@ -10,6 +10,10 @@ final class ExpensesViewModel {
     var errorMessage: String?
     var settleUpSuccess = false
 
+    // Hazel feedback — set briefly after auto-categorization, cleared after 3s
+    var lastHazelCategorization: String?
+    var isBulkCategorizing = false
+
     @ObservationIgnored
     private let expenseService = ExpenseService()
 
@@ -96,6 +100,11 @@ final class ExpensesViewModel {
             ) {
                 resolvedTitle = result.text
                 resolvedCategory = result.category
+                lastHazelCategorization = result.category
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(3))
+                    self?.lastHazelCategorization = nil
+                }
             }
         }
 
@@ -290,6 +299,59 @@ final class ExpensesViewModel {
             if !isCancellation(error) {
                 errorMessage = String(describing: error)
             }
+        }
+    }
+
+    // MARK: - Hazel Bulk Categorize (Pro)
+
+    /// Categorizes up to 20 uncategorized expenses in the current month using Hazel.
+    func bulkCategorizeUncategorized(
+        homeId: UUID,
+        myUserId: UUID,
+        partnerUserId: UUID?,
+        budgetCategoryNames: [String]
+    ) async {
+        guard !isBulkCategorizing else { return }
+
+        let cal = Calendar.current
+        let now = Date()
+        let uncategorized = expenses.filter { exp in
+            let category = exp.category?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard category.isEmpty else { return false }
+            guard let date = exp.incurredOnDate else { return false }
+            return cal.isDate(date, equalTo: now, toGranularity: .month)
+        }.prefix(20)
+
+        guard !uncategorized.isEmpty else { return }
+
+        isBulkCategorizing = true
+        defer { isBulkCategorizing = false }
+
+        let categories = budgetCategoryNames.isEmpty
+            ? Array(Set(expenses.compactMap(\.category).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })).sorted()
+            : budgetCategoryNames
+
+        for exp in uncategorized {
+            guard let result = await hazelService.categorizeExpense(
+                text: exp.title,
+                categories: categories,
+                homeId: homeId
+            ) else { continue }
+
+            await updateExpense(
+                exp,
+                title: result.text,
+                amount: exp.amount,
+                paidByUserId: exp.paidBy,
+                splitType: exp.splitType ?? "equal",
+                category: result.category,
+                notes: exp.notes,
+                incurredOn: exp.incurredOnDate ?? now,
+                homeId: homeId,
+                myUserId: myUserId,
+                partnerUserId: partnerUserId ?? myUserId,
+                isRecurring: exp.isRecurring ?? false
+            )
         }
     }
 
